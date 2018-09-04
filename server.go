@@ -275,21 +275,15 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 		// TODO(benesch): these rowspan computations hurt to look at.
 		masterPR := re.masterPRs[string(c.sha)]
 		// TODO(benesch): masterPR should never be nil!
-		if masterPR != nil {
-			if lastMasterPR != nil && lastMasterPR.number == masterPR.number {
-				masterPR = nil
-			} else {
-				if masterPRStart >= 0 {
-					acommits[masterPRStart].MasterPRRowSpan = i - masterPRStart
-				}
-				masterPRStart = i
-				lastMasterPR = masterPR
+		if masterPR != nil && (lastMasterPR == nil || lastMasterPR.number != masterPR.number) {
+			if masterPRStart >= 0 {
+				acommits[masterPRStart].MasterPRRowSpan = i - masterPRStart
 			}
+			masterPRStart = i
+			lastMasterPR = masterPR
 		}
 		backportPR := re.branchPRs[c.MessageID()][branch]
-		if (lastBackportPR == nil && backportPR == nil && lastMasterPR != masterPR) || (lastBackportPR != nil && backportPR != nil && lastBackportPR.number == backportPR.number) {
-			backportPR = nil
-		} else {
+		if !((lastBackportPR == nil && backportPR == nil && lastMasterPR != masterPR) || (lastBackportPR != nil && backportPR != nil && lastBackportPR.number == backportPR.number)) {
 			if backportPRStart >= 0 {
 				acommits[backportPRStart].BackportPRRowSpan = i - backportPRStart
 			}
@@ -315,6 +309,12 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 			MasterPR:       masterPR,
 			BackportPR:     backportPR,
 		})
+	}
+	if masterPRStart >= 0 {
+		acommits[masterPRStart].MasterPRRowSpan = len(acommits) - masterPRStart
+	}
+	if backportPRStart >= 0 {
+		acommits[backportPRStart].BackportPRRowSpan = len(acommits) - backportPRStart
 	}
 
 	if err := indexTemplate.Execute(w, struct {
