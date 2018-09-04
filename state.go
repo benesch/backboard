@@ -253,10 +253,11 @@ func (c commit) MessageID() string {
 // "annotated" commit; this belongs elsewhere (it's templating logic)
 type acommit struct {
 	commit
-	BackportStatus  string
-	MasterPR        *pr
-	MasterPRRowSpan int
-	BackportPR      *pr
+	BackportStatus    string
+	MasterPR          *pr
+	MasterPRRowSpan   int
+	BackportPR        *pr
+	BackportPRRowSpan int
 }
 
 const commitFormat = "%H%x00%s%x00%cI%x00%aE%x00%P"

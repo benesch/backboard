@@ -12,7 +12,173 @@ import (
 	"strings"
 )
 
-var indexTemplate = template.Must(template.ParseFiles("index.html"))
+var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: helvetica, sans-serif;
+            font-size: 14px;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+        }
+
+        label {
+            color: #666;
+            font-size: 13px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .header {
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .forms {
+            margin: 0 auto;
+            text-align: left;
+            width: 400px;
+        }
+
+        .forms span {
+            display: inline-block;
+            text-align: right;
+            width: 135px;
+        }
+
+        .forms select {
+            max-width: 200px;
+        }
+
+        .commit-table {
+            border-collapse: collapse;
+            margin: 1em auto 0;
+            padding: 0.1em;
+        }
+
+		.commit-table tr.master-border td.master-border,
+		.commit-table tr.backport-border td.backport-border {
+            border-top: 1px solid #bbb;
+		}
+
+        /*
+        .commit-table tr {
+            cursor: pointer;
+        }
+
+        .commit-table tbody tr:hover td:nth-child(-n + 4) {
+            background: #fffbcc;
+        }
+        */
+
+        .commit-table td {
+            padding: 0.3em 0.3em;
+        }
+
+        .commit-table form {
+            visibility: hidden;
+        }
+
+        .commit-table tr:hover form {
+            visibility: visible;
+        }
+
+        .sha {
+            font-family: monospace;
+        }
+
+        .center {
+            text-align: center;
+        }
+    </style>
+    <title>backboard</title>
+</head>
+<body>
+<div class="header">
+    <h1>backboard</h1>
+    <div class="forms">
+        <form>
+            <label>
+                <span>repo</span>
+                <select name="repo">
+                {{range .Repos}}
+                    <option value="{{.ID}}">{{.}}</option>
+                {{end}}
+                </select>
+                <input type="submit" value="go">
+            </label>
+        </form>
+        <form>
+            <label>
+                <span>branch</span>
+                <select name="branch">
+                    {{range .Branches}}
+                        <option {{if eq . $.Branch}}selected{{end}}>{{.}}</option>
+                    {{end}}
+                </select>
+                <input type="hidden" name="repo" value="{{.Repo.ID}}">
+                <input type="submit" value="go">
+            </label>
+        </form>
+        <form>
+            <label>
+                <span>author</span>
+                <select name="author">
+                    <option value="">All authors</option>
+                    {{range .Authors}}
+                        <option {{if eq $.Author.Email .Email}}selected{{end}}>{{.}}</option>
+                    {{end}}
+                </select>
+                <input type="hidden" name="repo" value="{{.Repo.ID}}">
+                <input type="hidden" name="branch" value="{{.Branch}}">
+                <input type="submit" value="go">
+            </label>
+        </form>
+        <!--<form>
+            <label>
+                <span>show excluded</span>
+                <input type="checkbox" name="excluded">
+                <input type="submit" value="go">
+            </label>
+        </form>-->
+    </div>
+</div>
+<table class="commit-table">
+    <thead>
+    <tr>
+        <th>SHA</th>
+        <th>Date</th>
+        <th>Author</th>
+        <th>Title</th>
+        <th>MPR</th>
+        <th>BPR</th>
+        <th>Ok?</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    {{range .Commits}}
+        <tr class="{{if .MasterPRRowSpan}}master-border{{end}} {{if .BackportPRRowSpan}}backport-border{{end}}">
+            <td class="sha master-border" title="{{.SHA}}">{{.SHA.Short}}</td>
+            <td class="master-border">{{.CommitDate.Format "2006-01-02"}}</td>
+            <td class="master-border" title="{{.Author.Email}}">{{.Author.Short}}</td>
+            <td class="master-border">{{.Title}}</td>
+            {{if .MasterPRRowSpan}}
+                <td class="master-border" rowspan="{{.MasterPRRowSpan}}"><a href="{{.MasterPR.URL}}">{{.MasterPR}}</a></td>
+			{{end}}
+			{{if .BackportPRRowSpan}}
+				<td class="backport-border" rowspan="{{.BackportPRRowSpan}}"><a href="{{.BackportPR.URL}}">{{.BackportPR}}</a></td>
+			{{end}}
+            <td class="backport-border center">{{.BackportStatus}}</td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>
+</body>
+</html>`))
 
 type server struct {
 	db *sql.DB
@@ -100,7 +266,10 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 	var acommits []acommit
 	var lastMasterPR *pr
 	masterPRStart := -1
+	var lastBackportPR *pr
+	backportPRStart := -1
 	for i, c := range commits {
+		// TODO(benesch): these rowspan computations hurt to look at.
 		masterPR := re.masterPRs[string(c.sha)]
 		// TODO(benesch): masterPR should never be nil!
 		if masterPR != nil {
@@ -115,6 +284,16 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 		backportPR := re.branchPRs[c.MessageID()][branch]
+		if (lastBackportPR == nil && backportPR == nil && lastMasterPR != masterPR) || (lastBackportPR != nil && backportPR != nil && lastBackportPR.number == backportPR.number) {
+			backportPR = nil
+		} else {
+			if backportPRStart >= 0 {
+				acommits[backportPRStart].BackportPRRowSpan = i - backportPRStart
+			}
+			backportPRStart = i
+			lastBackportPR = backportPR
+		}
+
 		var backportStatus string
 		if backportPR != nil {
 			if backportPR.merged {
