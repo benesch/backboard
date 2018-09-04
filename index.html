@@ -26,13 +26,17 @@
         .forms {
             margin: 0 auto;
             text-align: left;
-            width: 380px;
+            width: 400px;
         }
 
         .forms span {
             display: inline-block;
             text-align: right;
-            width: 125px;
+            width: 135px;
+        }
+
+        .forms select {
+            max-width: 200px;
         }
 
         .commit-table {
@@ -41,17 +45,21 @@
             padding: 0.1em;
         }
 
-        .commit-table tbody tr:nth-child(odd) {
-            background: #eee;
+        .row-heavy {
+            border-top: 1px solid #ccc;
         }
 
+
+
+        /*
         .commit-table tr {
             cursor: pointer;
         }
 
-        .commit-table tbody tr:hover {
+        .commit-table tbody tr:hover td:nth-child(-n + 4) {
             background: #fffbcc;
         }
+        */
 
         .commit-table td {
             padding: 0.3em 0.3em;
@@ -116,13 +124,13 @@
                 <input type="submit" value="go">
             </label>
         </form>
-        <form>
+        <!--<form>
             <label>
-                <span>show ignored</span>
-                <input type="checkbox" name="showIgnored">
+                <span>show excluded</span>
+                <input type="checkbox" name="excluded">
                 <input type="submit" value="go">
             </label>
-        </form>
+        </form>-->
     </div>
 </div>
 <table class="commit-table">
@@ -132,18 +140,24 @@
         <th>Date</th>
         <th>Author</th>
         <th>Title</th>
+        <th>MPR</th>
+        <th>BPR</th>
         <th>Backported?</th>
         <th></th>
     </tr>
     </thead>
     <tbody>
     {{range .Commits}}
-        <tr>
+        <tr class="{{if .MasterPRRowSpan}}row-heavy{{end}}">
             <td class="sha" title="{{.SHA}}">{{.SHA.Short}}</td>
             <td>{{.CommitDate.Format "2006-01-02"}}</td>
             <td title="{{.Author.Email}}">{{.Author.Short}}</td>
             <td>{{.Title}}</td>
-            <td class="center">{{if .Backported}}✓{{end}}</td>
+            {{if .MasterPRRowSpan}}
+                <td rowspan="{{.MasterPRRowSpan}}"><a href="{{.MasterPR.URL}}">{{.MasterPR}}</a></td>
+            {{end}}
+            <td><a href="{{.BackportPR.URL}}">{{.BackportPR}}</a></td>
+            <td class="center">{{.BackportStatus}}</td>
         </tr>
     {{end}}
     </tbody>

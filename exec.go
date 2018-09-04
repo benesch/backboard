@@ -28,7 +28,7 @@ func capture(args ...string) (string, error) {
 		return "", err
 	}
 	return string(bytes.TrimSpace(out)), err
-}t
+}
 
 // spawn executes the command specified by args. The subprocess inherits the
 // current processes's stdin, stdout, and stderr streams. If the process exits
