@@ -23,7 +23,12 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
 
         h1 {
             margin: 0 0 10px;
-        }
+		}
+
+		h1 a {
+			color: inherit;
+			text-decoration: none;
+		}
 
         label {
             color: #666;
@@ -98,7 +103,7 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
 </head>
 <body>
 <div class="header">
-    <h1>backboard</h1>
+    <h1><a href="/">backboard</a></h1>
     <div class="forms">
         <form>
             <label>
