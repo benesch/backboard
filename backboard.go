@@ -61,7 +61,7 @@ func run(args []string) error {
 
 func syncLoop(ctx context.Context, ghClient *github.Client, db *sql.DB) {
 	for {
-		if err := sync(ctx, ghClient, db); err != nil {
+		if err := syncAll(ctx, ghClient, db); err != nil {
 			log.Printf("sync error: %s", err)
 		}
 		// TODO(benesch): webhook support?

@@ -198,6 +198,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
+	repoLock.RLock()
+	defer repoLock.RUnlock()
+
 	var re repo
 	if s := r.URL.Query().Get("repo"); s != "" {
 		repoID, err := strconv.Atoi(s)

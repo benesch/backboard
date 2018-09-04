@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/cockroach-go/crdb"
@@ -66,6 +67,9 @@ CREATE TABLE IF NOT EXISTS commit_comments (
 	body string,
 	PRIMARY KEY (message_id, created_at)
 );`
+
+// TODO(benesch): ewww
+var repoLock sync.RWMutex
 
 type repo struct {
 	id          int64
@@ -336,7 +340,7 @@ func (p *pr) URL() string {
 		p.repo.githubOwner, p.repo.githubRepo, p.number)
 }
 
-func sync(ctx context.Context, ghClient *github.Client, db *sql.DB) error {
+func syncAll(ctx context.Context, ghClient *github.Client, db *sql.DB) error {
 	for i := range repos {
 		if err := syncRepo(ctx, ghClient, db, &repos[i]); err != nil {
 			return err
@@ -346,14 +350,9 @@ func sync(ctx context.Context, ghClient *github.Client, db *sql.DB) error {
 }
 
 func syncRepo(ctx context.Context, ghClient *github.Client, db *sql.DB, repo *repo) error {
-	return nil
 	log.Printf("syncing %s", repo)
 	defer log.Printf("done syncing %s", repo)
 	if err := spawn("git", "-C", repo.path(), "fetch"); err != nil {
-		return err
-	}
-
-	if err := repo.refresh(db); err != nil {
 		return err
 	}
 
@@ -376,7 +375,7 @@ func syncRepo(ctx context.Context, ghClient *github.Client, db *sql.DB, repo *re
 			break
 		}
 		// XXX
-		if len(allPRs) == 1000 {
+		if len(allPRs) == 3000 {
 			break
 		}
 		lastPR := prs[len(prs)-1]
@@ -394,6 +393,15 @@ func syncRepo(ctx context.Context, ghClient *github.Client, db *sql.DB, repo *re
 			return err
 		}
 	}
+
+	repoCopy := *repo
+	if err := repoCopy.refresh(db); err != nil {
+		return err
+	}
+
+	repoLock.Lock()
+	*repo = repoCopy
+	repoLock.Unlock()
 	return nil
 }
 
