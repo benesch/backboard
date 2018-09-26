@@ -58,37 +58,41 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
             max-width: 200px;
         }
 
-        .commit-table {
+        #commit-table {
             border-collapse: collapse;
             margin: 1em auto 0;
             padding: 0.1em;
         }
 
-		.commit-table tr.master-border td.master-border,
-		.commit-table tr.backport-border td.backport-border {
+		#commit-table tr.master-border td.master-border,
+		#commit-table tr.backport-border td.backport-border {
             border-top: 1px solid #bbb;
 		}
 
         /*
-        .commit-table tr {
+        #commit-table tr {
             cursor: pointer;
         }
 
-        .commit-table tbody tr:hover td:nth-child(-n + 4) {
+        #commit-table tbody tr:hover td:nth-child(-n + 4) {
             background: #fffbcc;
         }
         */
 
-        .commit-table td {
+        #commit-table td {
             padding: 0.3em 0.3em;
         }
 
-        .commit-table form {
-            visibility: hidden;
-        }
+        #commit-table tr.selected td:nth-child(-n+4) {
+            background: #fffbcc;
+		}
 
-        .commit-table tr:hover form {
-            visibility: visible;
+		#commit-table tr[data-backportable] td:nth-child(-n+4) {
+			cursor: pointer;
+		}
+
+        #commit-table form {
+            visibility: hidden;
         }
 
         .sha {
@@ -97,9 +101,79 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
 
         .center {
             text-align: center;
-        }
+		}
+
+		#backport-command {
+			bottom: 0;
+			left: 0;
+			right: 0;
+			position: fixed;
+			background: #eee;
+			border-top: 1px solid #bbb;
+			font-family: monospace;
+			text-align: center;
+		}
+
+		#backport-command {
+			padding: 14px;
+		}
     </style>
-    <title>backboard</title>
+	<title>backboard</title>
+
+	<script>
+		var prs = {{.MasterPRs}};
+
+		document.addEventListener("DOMContentLoaded", function () {
+			document.querySelector("#commit-table").addEventListener("click", function (e) {
+				var tdMatches = false, trMatches = false;
+				var el = e.target;
+				while (el != e.currentTarget) {
+					if (el.matches("td:nth-child(-n+4)"))
+						tdMatches = true;
+					if (trMatches = el.matches("[data-backportable]"))
+						break;
+					el = el.parentNode;
+				}
+				if (tdMatches && trMatches) {
+					el.classList.toggle("selected");
+					updateBackportHint();
+				}
+			});
+		});
+
+		function updateBackportHint() {
+			var selectedTrs = Array.from(document.querySelectorAll("#commit-table tr.selected"));
+			var selectedShas = new Set(selectedTrs.map(n => n.getAttribute("data-sha")));
+			var selectedPrs = new Set(selectedTrs.map(n => n.getAttribute("data-master-pr")).reverse());
+
+			var div = document.querySelector("#backport-command");
+
+			if (selectedPrs.size == 0) {
+				div.style.display = "none";
+				document.body.style.paddingBottom = "0";
+				return;
+			}
+
+			var unselectedShas = new Set();
+			for (var pr of selectedPrs) {
+				for (var sha of prs[pr]) {
+					if (!selectedShas.has(sha))
+						unselectedShas.add(sha);
+				}
+			}
+
+			var command = "backport " + Array.from(selectedPrs).join(" ");
+			if (selectedShas.size > unselectedShas.size)
+				command += " " + Array.from(unselectedShas).map(s => "-c '!" + s.slice(0, 7) + "'").join(" ");
+			else if (unselectedShas.size > 0)
+				command += " " + Array.from(selectedShas).map(s => "-c " + s.slice(0, 7)).join(" ");
+
+			div.querySelector("span").innerText = command;
+			div.style.display = "block";
+			console.log(div.offsetHeight);
+			document.body.style.paddingBottom = div.offsetHeight + "px";
+		}
+	</script>
 </head>
 <body>
 <div class="header">
@@ -151,11 +225,11 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
         </form>-->
     </div>
 </div>
-<table class="commit-table">
+<table id="commit-table">
     <thead>
     <tr>
         <th>SHA</th>
-        <th>Date</th>
+        <th>Merged At</th>
         <th>Author</th>
         <th>Title</th>
         <th>MPR</th>
@@ -166,9 +240,9 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
     </thead>
     <tbody>
     {{range .Commits}}
-        <tr class="{{if .MasterPRRowSpan}}master-border{{end}} {{if .BackportPRRowSpan}}backport-border{{end}}">
+        <tr class="{{if .MasterPRRowSpan}}master-border{{end}} {{if .BackportPRRowSpan}}backport-border{{end}}" data-sha="{{.SHA}}" data-master-pr="{{.MasterPR.Number}}" {{if .Backportable}}data-backportable{{end}}>
             <td class="sha master-border" title="{{.SHA}}">{{.SHA.Short}}</td>
-            <td class="master-border">{{.CommitDate.Format "2006-01-02"}}</td>
+            <td class="master-border">{{.MasterPR.MergedAt}}</td>
             <td class="master-border" title="{{.Author.Email}}">{{.Author.Short}}</td>
             <td class="master-border">{{.Title}}</td>
             {{if .MasterPRRowSpan}}
@@ -182,6 +256,9 @@ var indexTemplate = template.Must(template.New("index.html").Parse(`<!doctype ht
     {{end}}
     </tbody>
 </table>
+<div id="backport-command" style="display: none">
+	<span></span>
+</div>
 </body>
 </html>`))
 
@@ -271,6 +348,7 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 		return strings.Compare(sortedAuthors[i].Email, sortedAuthors[j].Email) < 0
 	})
 
+	masterPRs := map[int][]string{}
 	var acommits []acommit
 	var lastMasterPR *pr
 	masterPRStart := -1
@@ -298,7 +376,7 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 
 		var backportStatus string
 		if backportPR != nil {
-			if backportPR.merged {
+			if backportPR.mergedAt.Valid {
 				backportStatus = "✓"
 			} else {
 				backportStatus = "◷"
@@ -313,7 +391,9 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 			BackportStatus: backportStatus,
 			MasterPR:       masterPR,
 			BackportPR:     backportPR,
+			Backportable:   backportPR == nil,
 		})
+		masterPRs[masterPR.number] = append(masterPRs[masterPR.number], c.sha.String())
 	}
 	if masterPRStart >= 0 {
 		acommits[masterPRStart].MasterPRRowSpan = len(acommits) - masterPRStart
@@ -323,21 +403,23 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if err := indexTemplate.Execute(w, struct {
-		Repos    []repo
-		Repo     repo
-		Commits  []acommit
-		Branches []string
-		Branch   string
-		Authors  []user
-		Author   user
+		Repos     []repo
+		Repo      repo
+		Commits   []acommit
+		Branches  []string
+		Branch    string
+		Authors   []user
+		Author    user
+		MasterPRs map[int][]string
 	}{
-		Repos:    repos,
-		Repo:     re,
-		Commits:  acommits,
-		Branches: re.releaseBranches,
-		Branch:   branch,
-		Authors:  sortedAuthors,
-		Author:   author,
+		Repos:     repos,
+		Repo:      re,
+		Commits:   acommits,
+		Branches:  re.releaseBranches,
+		Branch:    branch,
+		Authors:   sortedAuthors,
+		Author:    author,
+		MasterPRs: masterPRs,
 	}); err != nil {
 		return err
 	}

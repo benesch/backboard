@@ -28,16 +28,16 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) != 3 {
-		return fmt.Errorf("usage: %s <conn-string> <listen-addr>", args[0])
+	if len(args) < 2 || len(args) > 3 {
+		return fmt.Errorf("usage: %s <conn-string> [<listen-addr>]", args[0])
 	}
-	connString, listenAddr := args[1], args[2]
 
 	githubToken := os.Getenv("BACKBOARD_GITHUB_TOKEN")
 	if githubToken == "" {
 		return errors.New("missing BACKBOARD_GITHUB_TOKEN env var")
 	}
 
+	connString := args[1]
 	db, err := sql.Open("postgres", connString)
 	if err != nil {
 		return err
@@ -51,10 +51,15 @@ func run(args []string) error {
 		return fmt.Errorf("while bootstrapping: %s", err)
 	}
 
-	go syncLoop(ctx, github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(
+	ghClient := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: githubToken},
-	))), db)
+	)))
 
+	if len(args) == 2 {
+		return syncAll(ctx, ghClient, db)
+	}
+	listenAddr := args[2]
+	go syncLoop(ctx, ghClient, db)
 	http.Handle("/", &server{db: db})
 	return http.ListenAndServe(listenAddr, nil)
 }

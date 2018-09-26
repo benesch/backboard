@@ -19,6 +19,7 @@ import (
 
 	"github.com/cockroachdb/cockroach-go/crdb"
 	"github.com/google/go-github/github"
+	"github.com/lib/pq"
 )
 
 const schema = `
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS prs (
 	title string,
 	body string,
 	open bool,
-	merged bool,
+	merged_at timestamptz,
 	base_sha bytes,
 	base_branch string,
 	author_username string,
@@ -122,17 +123,17 @@ func (r *repo) refresh(db *sql.DB) error {
 
 	r.masterPRs = map[string]*pr{}
 	rows, err := db.Query(
-		`SELECT number, sha
+		`SELECT number, merged_at, sha
 		FROM pr_commits JOIN prs ON pr_commits.pr_id = prs.id
-		WHERE merged AND base_branch = 'master'`)
+		WHERE merged_at IS NOT NULL AND base_branch = 'master'`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var s string
-		pr := &pr{repo: r, merged: true}
-		if err := rows.Scan(&pr.number, &s); err != nil {
+		pr := &pr{repo: r}
+		if err := rows.Scan(&pr.number, &pr.mergedAt, &s); err != nil {
 			return err
 		}
 		r.masterPRs[s] = pr
@@ -143,9 +144,9 @@ func (r *repo) refresh(db *sql.DB) error {
 
 	r.branchPRs = map[string]map[string]*pr{}
 	rows, err = db.Query(
-		`SELECT number, merged, message_id, base_branch
+		`SELECT number, merged_at, message_id, base_branch
 		FROM pr_commits JOIN prs ON pr_commits.pr_id = prs.id
-		WHERE merged OR open`)
+		WHERE merged_at IS NOT NULL OR open`)
 	if err != nil {
 		return err
 	}
@@ -154,7 +155,7 @@ func (r *repo) refresh(db *sql.DB) error {
 		var messageID string
 		var baseBranch string
 		p := &pr{repo: r}
-		if err := rows.Scan(&p.number, &p.merged, &messageID, &baseBranch); err != nil {
+		if err := rows.Scan(&p.number, &p.mergedAt, &messageID, &baseBranch); err != nil {
 			return err
 		}
 		if r.branchPRs[messageID] == nil {
@@ -257,6 +258,7 @@ func (c commit) MessageID() string {
 // "annotated" commit; this belongs elsewhere (it's templating logic)
 type acommit struct {
 	commit
+	Backportable      bool
 	BackportStatus    string
 	MasterPR          *pr
 	MasterPRRowSpan   int
@@ -321,9 +323,13 @@ func (s sha) String() string {
 }
 
 type pr struct {
-	repo   *repo
-	number int
-	merged bool
+	repo     *repo
+	number   int
+	mergedAt pq.NullTime
+}
+
+func (p *pr) Number() int {
+	return p.number
 }
 
 func (p *pr) String() string {
@@ -332,12 +338,20 @@ func (p *pr) String() string {
 	}
 	return fmt.Sprintf("#%d", p.number)
 }
+
 func (p *pr) URL() string {
 	if p == nil {
 		return "#"
 	}
 	return fmt.Sprintf("https://github.com/%s/%s/pull/%d",
 		p.repo.githubOwner, p.repo.githubRepo, p.number)
+}
+
+func (p *pr) MergedAt() string {
+	if p.mergedAt.Valid {
+		return p.mergedAt.Time.Format("2006-01-02 15:04:05")
+	}
+	return "(unknown)"
 }
 
 func syncAll(ctx context.Context, ghClient *github.Client, db *sql.DB) error {
@@ -372,10 +386,6 @@ func syncRepo(ctx context.Context, ghClient *github.Client, db *sql.DB, repo *re
 		log.Printf("fetched %d updated PRs (total: %d)", len(prs), len(allPRs))
 
 		if res.NextPage == 0 {
-			break
-		}
-		// XXX
-		if len(allPRs) == 3000 {
 			break
 		}
 		lastPR := prs[len(prs)-1]
@@ -436,15 +446,12 @@ func syncPR(ctx context.Context, db *sql.DB, repo *repo, pr *github.PullRequest)
 		} else if ok {
 			return nil
 		}
-		// pr.Merged is inexplicably not included in the PR list response, but
-		// pr.MergedAt is.
-		isMerged := pr.MergedAt != nil
 		if _, err := tx.Exec(
-			`UPSERT INTO prs (id, repo_id, number, title, body, open, merged, base_sha, base_branch,author_username, updated_at)
+			`UPSERT INTO prs (id, repo_id, number, title, body, open, merged_at, base_sha, base_branch, author_username, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 			pr.GetID(), repo.id, pr.GetNumber(),
 			pr.GetTitle(), pr.GetBody(),
-			pr.GetState() == "open", isMerged,
+			pr.GetState() == "open", pr.GetMergedAt(),
 			pr.GetBase().GetSHA(), pr.GetBase().GetRef(),
 			pr.GetUser().GetLogin(), pr.GetUpdatedAt(),
 		); err != nil {
