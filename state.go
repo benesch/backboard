@@ -403,6 +403,8 @@ func syncRepo(ctx context.Context, ghClient *github.Client, db *sql.DB, repo *re
 			if allPRs[i].MergedAt == nil && allPRs[i].GetState() == "closed" {
 				log.Printf("ignoring error while syncing closed, unmerged pr %d: %s",
 					allPRs[i].GetNumber(), err)
+			} else {
+				return err
 			}
 		}
 	}
