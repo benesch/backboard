@@ -456,7 +456,7 @@ func syncPR(ctx context.Context, db *sql.DB, repo *repo, pr *github.PullRequest)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 			pr.GetID(), repo.id, pr.GetNumber(),
 			pr.GetTitle(), pr.GetBody(),
-			pr.GetState() == "open", pr.GetMergedAt(),
+			pr.GetState() == "open", pr.MergedAt,
 			pr.GetBase().GetSHA(), pr.GetBase().GetRef(),
 			pr.GetUser().GetLogin(), pr.GetUpdatedAt(),
 		); err != nil {
