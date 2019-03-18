@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"vbom.ml/util/sortorder"
+
 	"github.com/cockroachdb/cockroach-go/crdb"
 	"github.com/google/go-github/github"
 	"github.com/lib/pq"
@@ -523,11 +525,15 @@ func bootstrap(ctx context.Context, db *sql.DB) error {
 		if err := scanner.Err(); err != nil {
 			return err
 		}
-		sort.Sort(sort.Reverse(sort.StringSlice(repos[i].releaseBranches)))
+		sortBranches(repos[i].releaseBranches)
 
 		if err := repos[i].refresh(db); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func sortBranches(branches []string) {
+	sort.Sort(sort.Reverse(sortorder.Natural(branches)))
 }
